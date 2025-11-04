@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Resume Optimizer",
+  "description": "An AI-powered tool to tailor your resume and cover letter for specific job applications. Paste a job description and your details, and let Gemini craft the perfect application materials for you.",
+  "requestFramePermissions": []
+}
