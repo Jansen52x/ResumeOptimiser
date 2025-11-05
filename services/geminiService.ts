@@ -24,7 +24,15 @@ export const optimizeApplication = async (
 
   const model = 'gemini-2.5-flash';
   
-  const systemInstruction = `You are an expert career coach and professional resume writer. Your task is to help a job applicant tailor their resume and write a compelling cover letter for a specific job posting. You will be given a job posting, the applicant's current resume (either as text or an image), a curated list of their most relevant projects, an old resume for formatting reference, and a sample cover letter for inspiration.
+  const systemInstruction = `
+You are an expert career coach and professional resume writer. 
+Your task is to help a job applicant tailor their resume and write a compelling cover letter for a specific job posting. 
+You will be given a job posting,
+the applicant's current resume (either as text or an image),
+a curated list of their most relevant projects,
+an old resume for formatting reference,
+a sample cover letter for inspiration, 
+and potentially some additional notes from the applicant about why they are interested in the role.
 
 Your response MUST be a JSON object that strictly follows this schema:
 1.  **resume**: A string containing the full text of the optimized resume in Markdown format.
@@ -48,15 +56,21 @@ Follow these instructions meticulously:
 1.  **Analyze Job & Company**: Use the job posting to understand the role and company.
 2.  **Synthesize Applicant's Strengths**: Draw from the newly tailored resume content and project descriptions.
 3.  **Inspiration**: Use the provided "Cover Letter Inspiration" to understand the applicant's tone, but do not copy it directly. The new letter must be unique and tailored to the new job.
-4.  **Structure**: Write a professional 3-4 paragraph cover letter.
-5.  **Formatting**: The output should be a single string of well-formatted Markdown.`;
+4.  **Personalize**: If the applicant provides additional information about their excitement for the role, weave these personal motivations into the cover letter to make it more authentic and compelling.
+5.  **Structure**: Write a professional 3-4 paragraph cover letter.
+6.  **Formatting**: The output should be a single string of well-formatted Markdown.`;
 
   const resumeContentPrompt = appData.resumeContent 
-    ? `## Applicant's Current Resume Content
-\`\`\`
-${appData.resumeContent}
-\`\`\`` 
+    ? `## Applicant's Current Resume Content\n\`\`\`\n${appData.resumeContent}\n\`\`\`` 
     : "The applicant's resume is provided as an image. Please extract the content from it.";
+
+  const additionalInfoPrompt = appData.additionalInfo
+    ? `## Additional Information from Applicant
+\`\`\`
+${appData.additionalInfo}
+\`\`\`
+`
+    : '';
 
   const textPrompt = `
   ## Job Posting
@@ -80,21 +94,36 @@ ${appData.resumeContent}
   \`\`\`
   ${appData.coverLetterInspiration || 'No cover letter provided. Write a new one from scratch.'}
   \`\`\`
+
+  ${additionalInfoPrompt}
   `;
   
-  const contents = appData.resumeScreenshot
-    ? {
-        parts: [
-          { text: textPrompt },
-          {
-            inlineData: {
-              mimeType: 'image/jpeg', // Assuming jpeg, could be dynamic
-              data: appData.resumeScreenshot,
-            },
-          },
-        ],
-      }
-    : textPrompt;
+  // Build contents: always include the main textPrompt, and append any images (job posting or resume) as inlineData parts
+  let contents: any = textPrompt;
+  const parts: any[] = [];
+  parts.push({ text: textPrompt });
+
+  if (appData.jobPostingScreenshot) {
+    parts.push({
+      inlineData: {
+        mimeType: 'image/jpeg', // Assuming jpeg, could be dynamic
+        data: appData.jobPostingScreenshot,
+      },
+    });
+  }
+
+  if (appData.resumeScreenshot) {
+    parts.push({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: appData.resumeScreenshot,
+      },
+    });
+  }
+
+  if (parts.length > 1) {
+    contents = { parts };
+  }
 
   const response = await ai.models.generateContent({
     model,
@@ -187,16 +216,24 @@ export const formatNewProject = async (rawText: string, existingProjects: Projec
   }
 };
 
-
-export const getProjectAdvice = async (jobPosting: string, project: Project): Promise<string> => {
+export const suggestProjects = async (jobPosting: string, allProjects: Project[]): Promise<string[]> => {
     const model = 'gemini-2.5-flash';
 
-    const systemInstruction = `You are an expert career coach. A user is considering adding a project to their resume for a specific job application. Your task is to provide a brief, actionable analysis of whether the project is a good fit.
+    const systemInstruction = `You are an expert career coach helping job applicants select the most relevant projects for their resume. Given a job posting and a list of all available projects, you must analyze which projects are most relevant to the role and return ONLY the project IDs as a JSON array of strings.
 
-    Your response should be a short paragraph (2-3 sentences) and must include:
-    1. A clear verdict: e.g., "Highly Relevant," "Good Fit," or "Less Relevant."
-    2. A brief justification explaining why, referencing specific skills from the project and the job description.
-    `;
+    Analyze the job posting for:
+    - Required and preferred skills
+    - Technologies mentioned
+    - Type of role and responsibilities
+    - Industry and domain
+
+    Then evaluate each project based on:
+    - Relevance of technologies used
+    - Alignment with job responsibilities
+    - Demonstrated skills that match requirements
+    - Impact and complexity
+
+    Return a JSON array containing the IDs of the 3-5 most relevant projects, ordered from most to least relevant.`;
 
     const prompt = `
     ## Job Posting
@@ -204,18 +241,34 @@ export const getProjectAdvice = async (jobPosting: string, project: Project): Pr
     ${jobPosting}
     \`\`\`
 
-    ## Project in Question
-    \`\`\`
-    ${formatProjectsForPrompt([project])}
-    \`\`\`
+    ## Available Projects
+    ${allProjects.map(p => `
+    ID: ${p.id}
+    ${formatProjectsForPrompt([p])}
+    `).join('\n---\n')}
 
-    Based on the job posting, please provide your expert advice on including this project.
+    Please analyze and return the IDs of the most relevant projects as a JSON array of strings.
     `;
 
     const response = await ai.models.generateContent({
         model,
         contents: prompt,
+        config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+            }
+        }
     });
 
-    return response.text;
+    const jsonText = response.text.trim();
+    try {
+        const projectIds = JSON.parse(jsonText);
+        return projectIds;
+    } catch (error) {
+        console.error("Failed to parse project suggestions:", jsonText);
+        throw new Error("The AI failed to suggest projects correctly. Please select manually.");
+    }
 };

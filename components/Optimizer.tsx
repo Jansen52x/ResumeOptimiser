@@ -4,7 +4,7 @@ import { OutputSection } from './OutputSection';
 import { ProjectSelectorModal } from './ProjectSelectorModal';
 import { SparklesIcon } from './icons/SparklesIcon';
 import { UploadIcon } from './icons/UploadIcon';
-import { optimizeApplication, getProjectAdvice } from '../services/geminiService';
+import { optimizeApplication, suggestProjects } from '../services/geminiService';
 import { blobToBase64 } from '../utils/fileUtils';
 import type { Project, Document, AppData, OptimizedResult } from '../types';
 
@@ -20,61 +20,59 @@ export const Optimizer: React.FC<OptimizerProps> = ({ allProjects, allDocuments 
   const [jobPosting, setJobPosting] = useState('');
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [baseResumeId, setBaseResumeId] = useState<string>('');
-  const [resumeScreenshot, setResumeScreenshot] = useState<string | null>(null);
-  const [resumeScreenshotUrl, setResumeScreenshotUrl] = useState<string | null>(null);
+  // job posting screenshot (user may paste job posting text OR upload an image of job posting)
+  const [jobPostingScreenshot, setJobPostingScreenshot] = useState<string | null>(null);
+  const [jobPostingScreenshotUrl, setJobPostingScreenshotUrl] = useState<string | null>(null);
 
   const [selectedCoverLetterId, setSelectedCoverLetterId] = useState<string>('');
+  const [additionalInfo, setAdditionalInfo] = useState('');
   
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [optimizedResult, setOptimizedResult] = useState<OptimizedResult | null>(null);
 
-  const [isAdviceLoading, setIsAdviceLoading] = useState(false);
-  const [adviceText, setAdviceText] = useState<string | null>(null);
-  const [currentAdviceProjectId, setCurrentAdviceProjectId] = useState<string | null>(null);
+  const [isSuggestingProjects, setIsSuggestingProjects] = useState(false);
 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
 
-  const handleGetAdvice = useCallback(async (project: Project) => {
+  const handleSuggestProjects = useCallback(async () => {
     if (!jobPosting) {
-      alert("Please paste the job description first to get advice.");
+      alert("Please paste the job description first to get project suggestions.");
       return;
     }
-    setAdviceText(null);
-    setCurrentAdviceProjectId(project.id);
-    setIsAdviceLoading(true);
+    setIsSuggestingProjects(true);
     try {
-      const advice = await getProjectAdvice(jobPosting, project);
-      setAdviceText(advice);
+      const suggestedIds = await suggestProjects(jobPosting, allProjects);
+      setSelectedProjectIds(suggestedIds);
+      alert(`AI suggested ${suggestedIds.length} relevant projects!`);
     } catch (e) {
-      setAdviceText(e instanceof Error ? e.message : "Failed to get advice.");
+      alert(e instanceof Error ? e.message : "Failed to get project suggestions.");
     } finally {
-      setIsAdviceLoading(false);
+      setIsSuggestingProjects(false);
     }
-  }, [jobPosting]);
+  }, [jobPosting, allProjects]);
 
   const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setBaseResumeId(''); // Clear dropdown selection
+      // If user uploads an image for the job posting, clear any pasted job posting text
+      setJobPosting('');
       const base64 = await blobToBase64(file);
-      setResumeScreenshot(base64);
-      setResumeScreenshotUrl(URL.createObjectURL(file));
+      setJobPostingScreenshot(base64);
+      setJobPostingScreenshotUrl(URL.createObjectURL(file));
     }
   };
 
   const handleBaseResumeSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setBaseResumeId(e.target.value);
-    if (resumeScreenshotUrl) {
-      URL.revokeObjectURL(resumeScreenshotUrl);
-    }
-    setResumeScreenshot(null);
-    setResumeScreenshotUrl(null);
+    // keep job posting screenshot independent of resume selection
   }
 
   const isFormValid = useMemo(() => {
-    return jobPosting && (baseResumeId || resumeScreenshot);
-  }, [jobPosting, baseResumeId, resumeScreenshot]);
+    // Require either pasted job posting text or an uploaded job posting screenshot,
+    // and require a base resume selection.
+    return (jobPosting || jobPostingScreenshot) && Boolean(baseResumeId);
+  }, [jobPosting, baseResumeId, jobPostingScreenshot]);
 
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
@@ -94,10 +92,12 @@ export const Optimizer: React.FC<OptimizerProps> = ({ allProjects, allDocuments 
     const appData: AppData = {
       jobPosting,
       resumeContent: selectedBaseResume ? selectedBaseResume.content : undefined,
-      resumeScreenshot: resumeScreenshot ?? undefined,
+      // send job posting image instead if provided
+      jobPostingScreenshot: jobPostingScreenshot ?? undefined,
       selectedProjects: allProjects.filter(p => selectedProjectIds.includes(p.id)),
       pastResumeFormat: selectedBaseResume ? selectedBaseResume.content : '',
       coverLetterInspiration: selectedCoverLetter ? selectedCoverLetter.content : '',
+      additionalInfo,
     };
     
     try {
@@ -109,7 +109,7 @@ export const Optimizer: React.FC<OptimizerProps> = ({ allProjects, allDocuments 
     } finally {
       setIsLoading(false);
     }
-  }, [isFormValid, jobPosting, baseResumeId, resumeScreenshot, selectedProjectIds, selectedCoverLetterId, allProjects, allDocuments]);
+  }, [isFormValid, jobPosting, baseResumeId, jobPostingScreenshot, selectedProjectIds, selectedCoverLetterId, allProjects, allDocuments, additionalInfo]);
 
 
   return (
@@ -123,66 +123,80 @@ export const Optimizer: React.FC<OptimizerProps> = ({ allProjects, allDocuments 
           <textarea
             id="job-posting"
             value={jobPosting}
-            onChange={(e) => setJobPosting(e.target.value)}
+            onChange={(e) => {
+              setJobPosting(e.target.value);
+              // If user starts typing a pasted job posting, clear any uploaded job-posting screenshot
+              if (jobPostingScreenshotUrl) {
+                URL.revokeObjectURL(jobPostingScreenshotUrl);
+                setJobPostingScreenshot(null);
+                setJobPostingScreenshotUrl(null);
+              }
+            }}
             disabled={isLoading}
             rows={16}
             className="w-full p-3 bg-slate-900 border border-slate-700 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors placeholder:text-slate-500"
             placeholder="e.g., Senior Frontend Engineer at Gemini..."
             required
           />
+
+          <div className="mt-4">
+            <p className="text-sm text-slate-400 mb-3">Or upload a screenshot of the job posting (image will be OCR'd).</p>
+            <label htmlFor="jobposting-upload" className={`
+                relative flex items-center justify-center w-full px-4 py-4 border-2 border-dashed rounded-lg cursor-pointer
+                bg-slate-900/50 border-slate-700 hover:bg-slate-800/80 hover:border-slate-600 transition-colors
+                ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                ${jobPostingScreenshotUrl ? 'border-cyan-500' : ''}
+              `}>
+              <input
+                id="jobposting-upload"
+                type="file"
+                className="absolute w-full h-full opacity-0 cursor-pointer"
+                onChange={handleScreenshotUpload}
+                disabled={isLoading}
+                accept="image/*"
+              />
+              {jobPostingScreenshotUrl ? (
+                <div className='text-center'>
+                  <img src={jobPostingScreenshotUrl} alt="Job posting preview" className="max-h-28 rounded-md mx-auto"/>
+                  <p className="mt-2 text-sm text-cyan-400 font-semibold">Screenshot selected!</p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <UploadIcon className="w-6 h-6 mx-auto text-slate-500" />
+                  <p className="mt-1 text-sm text-slate-400">
+                      <span className="font-semibold text-cyan-400">Upload screenshot</span>
+                  </p>
+                </div>
+              )}
+            </label>
+          </div>
         </div>
 
-        {/* 2. BASE RESUME */}
+        {/* 2. BASE DOCUMENTS */}
         <div>
-          <label htmlFor="base-resume" className="block text-lg font-semibold text-slate-200 mb-2">2. Your Base Resume</label>
-          <div className="space-y-4">
-              <p className="text-sm text-slate-400">Select a resume from your library for content and style inspiration.</p>
+          <label htmlFor="base-resume" className="block text-lg font-semibold text-slate-200 mb-2">2. Base Documents</label>
+          <div className="space-y-4 rounded-md p-4 border border-slate-700 bg-slate-900/50">
+              <p className="text-sm text-slate-400">Select a base resume for content/style and an optional cover letter for tone.</p>
               <select
                   id="base-resume"
                   value={baseResumeId}
                   onChange={handleBaseResumeSelect}
                   disabled={isLoading || allDocuments.resumes.length === 0}
-                  className="w-full p-3 bg-slate-900 border border-slate-700 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors disabled:opacity-50"
+                  className="w-full p-3 bg-slate-800 border border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors disabled:opacity-50"
               >
-                  <option value="">{allDocuments.resumes.length === 0 ? 'No resumes in library' : 'Select a resume...'}</option>
+                  <option value="">{allDocuments.resumes.length === 0 ? 'No resumes in library' : 'Select a base resume...'}</option>
                   {allDocuments.resumes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
-            <div className="flex items-center gap-4">
-                <hr className="flex-grow border-slate-700"/>
-                <span className="text-slate-500 text-sm">OR</span>
-                <hr className="flex-grow border-slate-700"/>
-            </div>
-            <div>
-              <p className="text-sm text-slate-400 mb-3">Upload a screenshot of a resume.</p>
-                <label htmlFor="screenshot-upload" className={`
-                    relative flex items-center justify-center w-full px-4 py-4 border-2 border-dashed rounded-lg cursor-pointer
-                    bg-slate-900/50 border-slate-700 hover:bg-slate-800/80 hover:border-slate-600 transition-colors
-                    ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}
-                    ${resumeScreenshotUrl ? 'border-cyan-500' : ''}
-                  `}>
-                  <input
-                    id="screenshot-upload"
-                    type="file"
-                    className="absolute w-full h-full opacity-0 cursor-pointer"
-                    onChange={handleScreenshotUpload}
-                    disabled={isLoading}
-                    accept="image/*"
-                  />
-                  {resumeScreenshotUrl ? (
-                    <div className='text-center'>
-                      <img src={resumeScreenshotUrl} alt="Resume preview" className="max-h-20 rounded-md mx-auto"/>
-                      <p className="mt-2 text-sm text-cyan-400 font-semibold">Screenshot selected!</p>
-                    </div>
-                  ) : (
-                    <div className="text-center">
-                      <UploadIcon className="w-6 h-6 mx-auto text-slate-500" />
-                      <p className="mt-1 text-sm text-slate-400">
-                          <span className="font-semibold text-cyan-400">Upload screenshot</span>
-                      </p>
-                    </div>
-                  )}
-                </label>
-            </div>
+              <select
+                id="cl-inspiration"
+                value={selectedCoverLetterId}
+                onChange={(e) => setSelectedCoverLetterId(e.target.value)}
+                disabled={isLoading || allDocuments.coverLetters.length === 0}
+                className="w-full p-3 bg-slate-800 border border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors disabled:opacity-50"
+              >
+                <option value="">{allDocuments.coverLetters.length === 0 ? 'No cover letters in library' : 'Select a base cover letter...'}</option>
+                {allDocuments.coverLetters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
           </div>
         </div>
         
@@ -200,20 +214,19 @@ export const Optimizer: React.FC<OptimizerProps> = ({ allProjects, allDocuments 
           </button>
         </div>
 
-        {/* 4. COVER LETTER INSPIRATION */}
+        {/* 4. ADDITIONAL INFO */}
         <div>
-            <label htmlFor="cl-inspiration" className="block text-lg font-semibold text-slate-200 mb-2">4. Inspiration (Optional)</label>
-            <p className="text-sm text-slate-400 mb-3">Select a past cover letter for tone.</p>
-            <select
-                id="cl-inspiration"
-                value={selectedCoverLetterId}
-                onChange={(e) => setSelectedCoverLetterId(e.target.value)}
-                disabled={isLoading || allDocuments.coverLetters.length === 0}
-                className="w-full p-3 bg-slate-900 border border-slate-700 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors disabled:opacity-50"
-            >
-                <option value="">{allDocuments.coverLetters.length === 0 ? 'No cover letters in library' : 'Select a cover letter...'}</option>
-                {allDocuments.coverLetters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <label htmlFor="additional-info" className="block text-lg font-semibold text-slate-200 mb-2">4. Additional Information (Optional)</label>
+            <p className="text-sm text-slate-400 mb-3">Tell the AI why you're excited about this role, or any other notes you want it to consider.</p>
+            <textarea
+                id="additional-info"
+                value={additionalInfo}
+                onChange={(e) => setAdditionalInfo(e.target.value)}
+                disabled={isLoading}
+                rows={5}
+                className="w-full p-3 bg-slate-900 border border-slate-700 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors placeholder:text-slate-500"
+                placeholder="e.g., I'm really passionate about the mission of this company because..."
+            />
         </div>
 
         {/* SUBMIT BUTTON */}
@@ -233,16 +246,14 @@ export const Optimizer: React.FC<OptimizerProps> = ({ allProjects, allDocuments 
         <ProjectSelectorModal
           allProjects={allProjects}
           selectedIds={selectedProjectIds}
-          jobPosting={jobPosting}
-          onGetAdvice={handleGetAdvice}
-          isAdviceLoading={isAdviceLoading}
-          adviceText={adviceText}
-          currentAdviceProjectId={currentAdviceProjectId}
           onClose={() => setIsProjectModalOpen(false)}
           onSave={(newSelectedIds) => {
             setSelectedProjectIds(newSelectedIds);
             setIsProjectModalOpen(false);
           }}
+          onSuggestProjects={handleSuggestProjects}
+          isSuggestingProjects={isSuggestingProjects}
+          hasJobPosting={Boolean(jobPosting)}
         />
       )}
 

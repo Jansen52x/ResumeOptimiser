@@ -4,6 +4,8 @@ import Knex from 'knex';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import { existsSync, mkdirSync } from 'node:fs';
 
 const app = express();
 const port = 3001;
@@ -11,7 +13,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 app.use(cors());
-app.use(express.json());
+// allow larger JSON payloads because PDFs are uploaded as base64 in the request body
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Serve uploaded files statically from /uploads
+const uploadsDir = path.resolve(__dirname, 'uploads');
+if (!existsSync(uploadsDir)) {
+  mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
+
+// server origin used to build absolute URLs for uploaded files
+const serverOrigin = `http://localhost:${port}`;
 
 const knex = Knex({
   client: 'sqlite3',
@@ -41,7 +55,17 @@ const initializeDatabase = async () => {
       table.string('name').notNullable();
       table.text('content');
       table.string('type').notNullable(); // 'resume' or 'coverLetter'
+      table.string('file_path'); // optional path to stored PDF (e.g. /uploads/doc-...pdf)
     });
+  }
+  else {
+    // ensure file_path column exists for older DBs
+    const hasFilePath = await knex.schema.hasColumn('documents', 'file_path');
+    if (!hasFilePath) {
+      await knex.schema.table('documents', table => {
+        table.string('file_path');
+      });
+    }
   }
 };
 
@@ -80,20 +104,67 @@ app.delete('/api/projects/:id', async (req, res) => {
 
 // Documents
 app.get('/api/documents', async (req, res) => {
-  const resumes = await knex('documents').where({ type: 'resume' }).select('*');
-  const coverLetters = await knex('documents').where({ type: 'coverLetter' }).select('*');
-  res.json({ resumes, coverLetters });
+  const resumesDb = await knex('documents').where({ type: 'resume' }).select('*');
+  const coverLettersDb = await knex('documents').where({ type: 'coverLetter' }).select('*');
+
+  // map file_path -> filePath for client-friendly casing
+  const mapRow = (r: any) => ({ id: r.id, name: r.name, content: r.content, filePath: r.file_path, type: r.type });
+  res.json({ resumes: resumesDb.map(mapRow), coverLetters: coverLettersDb.map(mapRow) });
 });
 
 app.post('/api/documents', async (req, res) => {
-  const { type, ...docData } = req.body;
-  const newDoc = { ...docData, id: `doc-${crypto.randomUUID()}`, type };
+  const { type, fileBase64, ...docData } = req.body;
+  const id = `doc-${crypto.randomUUID()}`;
+  let filePath: string | null = null;
+
+  // if a base64 PDF was provided, decode and write to uploads directory
+  if (fileBase64) {
+    try {
+      // strip data URL prefix if present
+      const base64 = (fileBase64 as string).startsWith('data:') ? (fileBase64 as string).split(',')[1] : fileBase64 as string;
+      const buffer = Buffer.from(base64, 'base64');
+  const filename = `${id}.pdf`;
+  const outPath = path.join(uploadsDir, filename);
+  await fs.writeFile(outPath, buffer);
+  // return an absolute URL so clients can directly fetch the PDF from the backend
+  filePath = `${serverOrigin}/uploads/${filename}`;
+    } catch (e) {
+      console.error('Failed to write uploaded file', e);
+      return res.status(500).json({ error: 'Failed to save uploaded file' });
+    }
+  }
+
+  const newDoc = { ...docData, id, type, file_path: filePath } as any;
   await knex('documents').insert(newDoc);
-  res.status(201).json(newDoc);
+
+  // return client-friendly shape
+  res.status(201).json({ id, ...docData, type, filePath });
 });
 
 app.delete('/api/documents/:type/:id', async (req, res) => {
   const { id } = req.params;
+  // get file_path if any and delete file
+  const row = await knex('documents').where({ id }).first();
+  if (row && row.file_path) {
+    try {
+      // row.file_path may be an absolute URL (e.g. http://host/uploads/filename.pdf)
+      // or a relative path (/uploads/filename.pdf). Extract the pathname to compute
+      // the filesystem path to the stored file.
+      let pathname = row.file_path;
+      try {
+        const u = new URL(row.file_path);
+        pathname = u.pathname; // e.g. /uploads/filename.pdf
+      } catch (e) {
+        // not a valid URL, assume it's already a path
+      }
+      const full = path.join(__dirname, pathname.replace(/^\//, ''));
+      if (existsSync(full)) {
+        await fs.unlink(full);
+      }
+    } catch (e) {
+      console.error('Failed to remove file for document', id, e);
+    }
+  }
   await knex('documents').where({ id }).del();
   res.status(204).send();
 });

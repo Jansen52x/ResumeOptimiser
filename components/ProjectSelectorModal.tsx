@@ -1,28 +1,23 @@
 import React, { useState, useMemo } from 'react';
 import type { Project } from '../types';
 import { XMarkIcon } from './icons/XMarkIcon';
+import { SparklesIcon } from './icons/SparklesIcon';
 
 interface ProjectSelectorModalProps {
   allProjects: Project[];
   selectedIds: string[];
-  jobPosting: string;
-  isAdviceLoading: boolean;
-  adviceText: string | null;
-  currentAdviceProjectId: string | null;
   onClose: () => void;
   onSave: (selectedIds: string[]) => void;
-  onGetAdvice: (project: Project) => void;
+  onSuggestProjects: () => void;
+  isSuggestingProjects: boolean;
+  hasJobPosting: boolean;
 }
 
 const ProjectSelectItem: React.FC<{
   project: Project;
   isSelected: boolean;
   onToggle: (id: string) => void;
-  onGetAdvice: (project: Project) => void;
-  isAdviceLoading: boolean;
-  adviceText: string | null;
-  currentAdviceProjectId: string | null;
-}> = ({ project, isSelected, onToggle, onGetAdvice, isAdviceLoading, adviceText, currentAdviceProjectId }) => (
+}> = ({ project, isSelected, onToggle }) => (
   <li className="p-4 bg-slate-800 rounded-lg border border-slate-700 transition-colors">
     <div className="flex items-start justify-between">
       <div>
@@ -36,35 +31,17 @@ const ProjectSelectItem: React.FC<{
         className="form-checkbox h-5 w-5 bg-slate-900 border-slate-600 text-cyan-500 rounded focus:ring-cyan-500 cursor-pointer flex-shrink-0 ml-4"
       />
     </div>
-    <div className="mt-3">
-       <button
-        type="button"
-        onClick={() => onGetAdvice(project)}
-        disabled={(isAdviceLoading && currentAdviceProjectId === project.id)}
-        className="text-xs font-semibold text-teal-400 hover:text-teal-300 disabled:opacity-50 disabled:cursor-wait"
-      >
-        {isAdviceLoading && currentAdviceProjectId === project.id ? 'Getting advice...' : 'Get Advice on this Project'}
-      </button>
-    </div>
-    {currentAdviceProjectId === project.id && adviceText && (
-      <div className="mt-3 p-3 text-xs bg-slate-900/70 border border-slate-700 rounded-md">
-        <p className="font-bold text-slate-300 mb-1">Gemini's Advice:</p>
-        <p className="text-slate-400 whitespace-pre-wrap">{adviceText}</p>
-      </div>
-    )}
   </li>
 );
 
 export const ProjectSelectorModal: React.FC<ProjectSelectorModalProps> = ({
   allProjects,
   selectedIds,
-  jobPosting,
   onClose,
   onSave,
-  onGetAdvice,
-  isAdviceLoading,
-  adviceText,
-  currentAdviceProjectId
+  onSuggestProjects,
+  isSuggestingProjects,
+  hasJobPosting
 }) => {
   const [currentSelectedIds, setCurrentSelectedIds] = useState(selectedIds);
   const [searchTerm, setSearchTerm] = useState('');
@@ -94,14 +71,26 @@ export const ProjectSelectorModal: React.FC<ProjectSelectorModalProps> = ({
           </button>
         </header>
 
-        <div className="p-4">
-          <input
-            type="text"
-            placeholder="Search projects..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full p-2 bg-slate-900 border border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500"
-          />
+        <div className="p-4 space-y-3">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1 p-2 bg-slate-900 border border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500"
+            />
+            <button
+              type="button"
+              onClick={onSuggestProjects}
+              disabled={!hasJobPosting || isSuggestingProjects}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 text-white font-semibold rounded-md hover:from-cyan-500 hover:to-teal-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!hasJobPosting ? "Add a job posting first" : "Let AI suggest relevant projects"}
+            >
+              <SparklesIcon className="w-4 h-4" />
+              {isSuggestingProjects ? 'Suggesting...' : 'Suggest Projects'}
+            </button>
+          </div>
         </div>
 
         <div className="flex-grow overflow-y-auto p-4">
@@ -113,10 +102,6 @@ export const ProjectSelectorModal: React.FC<ProjectSelectorModalProps> = ({
                     project={p}
                     isSelected={currentSelectedIds.includes(p.id)}
                     onToggle={handleToggle}
-                    onGetAdvice={onGetAdvice}
-                    isAdviceLoading={isAdviceLoading}
-                    adviceText={adviceText}
-                    currentAdviceProjectId={currentAdviceProjectId}
                 />
               ))}
             </ul>

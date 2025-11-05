@@ -100,7 +100,7 @@ const App: React.FC = () => {
         </div>
       </main>
       <footer className="text-center p-4 text-slate-500 text-sm">
-        <p>Powered by Google Gemini. For personal use only.</p>
+        <p>Powered by Google Gemini.</p>
       </footer>
     </div>
   );

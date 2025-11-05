@@ -1,7 +1,7 @@
 import type { Project, Document } from '../types';
 import { INITIAL_PROJECTS } from '../constants';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+export const API_BASE_URL = 'http://localhost:3001/api';
 
 const simulateLatency = (ms: number = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -65,7 +65,7 @@ export const getDocuments = async (): Promise<DocumentsShape> => {
     return response.json();
 };
 
-export const addDocument = async (type: 'resume' | 'coverLetter', docData: Omit<Document, 'id'>): Promise<Document> => {
+export const addDocument = async (type: 'resume' | 'coverLetter', docData: any): Promise<Document> => {
     await simulateLatency();
     const response = await fetch(`${API_BASE_URL}/documents`, {
         method: 'POST',
