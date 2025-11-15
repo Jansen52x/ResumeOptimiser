@@ -1,0 +1,99 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[margin=1cm]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{hyperref}
+
+\setstretch{1.05}
+\pagenumbering{gobble}
+
+% --- Section formatting ---
+\titleformat{\section}{
+  \large\bfseries
+}{}{0em}{}[\titlerule]
+
+\newcommand{\workentry}[4]{%
+  \textbf{#1} \hfill \textit{#2}\\
+  \textit{#3}\\[-2pt]
+  \begin{itemize}[leftmargin=1em, noitemsep, topsep=0pt]
+    #4
+  \end{itemize}
+}
+
+\newcommand{\projectentry}[4]{%
+  \textbf{#1} \hfill \textit{#2}\\
+  \textit{#3}\\[-4pt]
+  \begin{itemize}[leftmargin=1em, noitemsep, topsep=0pt]
+    #4
+  \end{itemize}
+}
+
+\newcommand{\skillentry}[2]{%
+  \textbf{#1} {#2} \\
+}
+
+
+\begin{document}
+
+% ---------------- HEADER ----------------
+% --- Header ---
+{\LARGE \textbf{Teo Yong Ray}}\\[3pt]
+SMU Information Systems, Year 4 (Digitalisation \& Cloud Solutioning, Business Analytics)\\
+\href{mailto:teoyongray@hotmail.com}{teoyongray@hotmail.com} \quad | \quad +65 9062 0520 \quad | \quad Singapore Citizen \\
+\href{https://portfolio-368.web.app}{Portfolio} \quad | \quad \href{https://github.com/Jansen52x}{Github} \quad | \quad \href{https://linkedin.com/in/yongray-teo}{LinkedIn}\\[6pt]
+
+% ---------------- SUMMARY ----------------
+{{ summary }}\\[10pt]
+
+% ---------------- EDUCATION ----------------
+\section*{Education}
+
+\textbf{SINGAPORE MANAGEMENT UNIVERSITY} \hfill \textit{Aug 2022 -- May 2026}\\
+Bachelor of Science (Information Systems)\\
+Double Major in Digitalisation \& Cloud Solutioning, Business Analytics\\
+• GPA 3.9/4.0 (Summa Cum Laude), Dean’s List (AY 22/23 \& 23/24)\\[6pt]
+
+% ---------------- WORK EXPERIENCE ----------------
+\section*{Work Experience}
+{% for exp in work_experience %}
+\workentry
+  { {{ exp.company }} }
+  { {{ exp.dates }} }
+  { {{ exp.role }} }
+  {
+    {% for bullet in exp.bullets %}
+    \item {{ bullet }}
+    {% endfor %}
+  }
+{% endfor %}
+
+\newpage
+
+% ---------------- NOTABLE PROJECTS ----------------
+\section*{Notable Projects (Refer to Portfolio for full list)}
+{% for proj in projects %}
+\projectentry
+  { {{ proj.company }} }
+  { {{ proj.dates }} }
+  { {{ proj.minor_desc }} }
+  {
+    {% for bullet in proj.bullets %}
+    \item {{ bullet }}
+    {% endfor %}
+  }
+{% endfor %}
+
+% ---------------- SKILLS ----------------
+
+\section*{Skills}
+{% for skill in skills %}
+\skillentry
+    { {{ skill.title }}: } 
+    { {{ skill.items }} }
+{% endfor %}
+
+\textbf{Languages:} English, Mandarin\\
+{{ skills }}
+
+\end{document}
