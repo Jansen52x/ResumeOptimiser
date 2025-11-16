@@ -3,19 +3,20 @@ import { SparklesIcon } from './components/icons/SparklesIcon';
 import { NavigationBar } from './components/NavigationBar';
 import { Optimizer } from './components/Optimizer';
 import { ProjectManager } from './components/ProjectManager';
-import { DocumentManager } from './components/DocumentManager';
+import { WorkExperienceManager } from './components/WorkExperienceManager';
+import { SkillsManager } from './components/SkillsManager';
+import { ResultsViewer } from './components/ResultsViewer';
 import * as apiService from './services/apiService';
-import type { Project, Document } from './types';
+import type { Project, WorkExperience, Skill, SavedResult } from './types';
 
-type Tab = 'optimizer' | 'projects' | 'documents';
+type Tab = 'optimizer' | 'projects' | 'work-experience' | 'skills' | 'results';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('optimizer');
   const [projects, setProjects] = useState<Project[]>([]);
-  const [documents, setDocuments] = useState<{ resumes: Document[]; coverLetters: Document[] }>({
-    resumes: [],
-    coverLetters: [],
-  });
+  const [workExperiences, setWorkExperiences] = useState<WorkExperience[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [results, setResults] = useState<SavedResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,12 +30,32 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const fetchDocuments = useCallback(async () => {
+  const fetchWorkExperiences = useCallback(async () => {
     try {
-      const documentsData = await apiService.getDocuments();
-      setDocuments(documentsData);
+      const experiencesData = await apiService.getWorkExperiences();
+      setWorkExperiences(experiencesData);
     } catch (err) {
-      setError('Failed to load documents.');
+      setError('Failed to load work experiences.');
+      console.error(err);
+    }
+  }, []);
+
+  const fetchSkills = useCallback(async () => {
+    try {
+      const skillsData = await apiService.getSkills();
+      setSkills(skillsData);
+    } catch (err) {
+      setError('Failed to load skills.');
+      console.error(err);
+    }
+  }, []);
+
+  const fetchResults = useCallback(async () => {
+    try {
+      const resultsData = await apiService.getResults();
+      setResults(resultsData);
+    } catch (err) {
+      setError('Failed to load results.');
       console.error(err);
     }
   }, []);
@@ -45,12 +66,14 @@ const App: React.FC = () => {
       setError(null);
       await Promise.all([
         fetchProjects(),
-        fetchDocuments()
+        fetchWorkExperiences(),
+        fetchSkills(),
+        fetchResults()
       ]);
       setIsLoading(false);
     };
     loadData();
-  }, [fetchProjects, fetchDocuments]);
+  }, [fetchProjects, fetchWorkExperiences, fetchSkills, fetchResults]);
   
   if (isLoading) {
     return (
@@ -93,9 +116,11 @@ const App: React.FC = () => {
           <NavigationBar activeTab={activeTab} setActiveTab={setActiveTab} />
           
           <div className="mt-8">
-            {activeTab === 'optimizer' && <Optimizer allProjects={projects} allDocuments={documents} />}
+            {activeTab === 'optimizer' && <Optimizer allProjects={projects} allWorkExperiences={workExperiences} allSkills={skills} onOptimizationComplete={fetchResults} />}
             {activeTab === 'projects' && <ProjectManager projects={projects} refreshProjects={fetchProjects} />}
-            {activeTab === 'documents' && <DocumentManager documents={documents} refreshDocuments={fetchDocuments} />}
+            {activeTab === 'work-experience' && <WorkExperienceManager experiences={workExperiences} onUpdate={fetchWorkExperiences} />}
+            {activeTab === 'skills' && <SkillsManager skills={skills} onUpdate={fetchSkills} />}
+            {activeTab === 'results' && <ResultsViewer results={results} refreshResults={fetchResults} />}
           </div>
         </div>
       </main>

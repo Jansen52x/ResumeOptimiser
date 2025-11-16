@@ -6,13 +6,8 @@ import { DocumentIcon } from './icons/DocumentIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 
-// PDF parsing
-// @ts-ignore - pdfjs types may not be available in this project; import legacy build for browser
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf';
-// Use a CDN-hosted worker to avoid bundler export mismatches in dev
-// pin to the same major version as package.json
-const PDFJS_VERSION = '2.16.105';
-(GlobalWorkerOptions as any).workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`;
+// DOCX parsing
+import mammoth from 'mammoth';
 
 interface DocumentManagerProps {
   documents: {
@@ -27,7 +22,7 @@ const FileInput: React.FC<{
   onFileChange: (file: File | null) => void;
   isLoading: boolean;
   accept?: string;
-}> = ({ id, onFileChange, isLoading, accept = '.pdf' }) => (
+}> = ({ id, onFileChange, isLoading, accept = '.docx' }) => (
   <div className="relative">
     <div className={`
       flex items-center justify-center w-full px-4 py-6 border-2 border-dashed rounded-lg cursor-pointer
@@ -100,6 +95,8 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
   const [selectedCoverArrayBuffer, setSelectedCoverArrayBuffer] = useState<ArrayBuffer | null>(null);
   const [extractedResumeText, setExtractedResumeText] = useState<string>('');
   const [extractedCoverText, setExtractedCoverText] = useState<string>('');
+  const [extractedResumeHtml, setExtractedResumeHtml] = useState<string>('');
+  const [extractedCoverHtml, setExtractedCoverHtml] = useState<string>('');
   const [nameInputResume, setNameInputResume] = useState<string>('');
   const [nameInputCover, setNameInputCover] = useState<string>('');
   // stable preview src/type captured at file-selection time so modal doesn't depend on
@@ -144,23 +141,22 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
     return () => { document.body.style.overflow = prev; };
   }, [showSelectedPreviewModal, previewDoc]);
 
-  const extractTextFromPDF = async (arrayBuffer: ArrayBuffer) => {
+  const extractTextFromDOCX = async (arrayBuffer: ArrayBuffer) => {
     try {
-      const loadingTask = getDocument({ data: arrayBuffer });
-      const pdf = await loadingTask.promise;
-      const maxPages = pdf.numPages;
-      const pageTextPromises = [];
-      for (let i = 1; i <= maxPages; i++) {
-        // eslint-disable-next-line no-loop-func
-        pageTextPromises.push(pdf.getPage(i).then(async (page: any) => {
-          const content = await page.getTextContent();
-          return content.items.map((s: any) => s.str).join(' ');
-        }));
-      }
-      const pagesText = await Promise.all(pageTextPromises);
-      return pagesText.join('\n\n');
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return result.value || '';
     } catch (e) {
-      console.error('PDF parse error', e);
+      console.error('DOCX text extraction error', e);
+      return '';
+    }
+  };
+
+  const extractHtmlFromDOCX = async (arrayBuffer: ArrayBuffer) => {
+    try {
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      return result.value || '';
+    } catch (e) {
+      console.error('DOCX HTML extraction error', e);
       return '';
     }
   };
@@ -182,9 +178,13 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
       return;
     }
 
-    // only accept PDFs (extra guard)
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Please upload a PDF file.');
+    // only accept DOCX files (extra guard)
+    const validTypes = [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/docx'
+    ];
+    if (!validTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.docx')) {
+      alert('Please upload a DOCX file.');
       return;
     }
 
@@ -195,7 +195,7 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
       // capture the preview src/type immediately so the modal always shows the right blob
       setSelectedPreviewSrc(url);
       setSelectedPreviewType(type);
-      setNameInputResume(file.name.replace(/\.pdf$/i, ''));
+      setNameInputResume(file.name.replace(/\.docx$/i, ''));
     } else {
       setSelectedCoverFile(file);
       const url = URL.createObjectURL(file);
@@ -203,19 +203,25 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
       // capture the preview src/type immediately so the modal always shows the right blob
       setSelectedPreviewSrc(url);
       setSelectedPreviewType(type);
-      setNameInputCover(file.name.replace(/\.pdf$/i, ''));
+      setNameInputCover(file.name.replace(/\.docx$/i, ''));
     }
 
-    // parse PDF to extract text
+    // parse DOCX to extract text and HTML
     const reader = new FileReader();
     reader.onload = async () => {
       const arrayBuffer = reader.result as ArrayBuffer;
       // keep arrayBuffer for base64 upload later
       if (type === 'resume') setSelectedResumeArrayBuffer(arrayBuffer);
       else setSelectedCoverArrayBuffer(arrayBuffer);
-      const text = await extractTextFromPDF(arrayBuffer);
-      if (type === 'resume') setExtractedResumeText(text || '(No extractable text)');
-      else setExtractedCoverText(text || '(No extractable text)');
+      const text = await extractTextFromDOCX(arrayBuffer);
+      const html = await extractHtmlFromDOCX(arrayBuffer);
+      if (type === 'resume') {
+        setExtractedResumeText(text || '(No extractable text)');
+        setExtractedResumeHtml(html || '<p>(No extractable content)</p>');
+      } else {
+        setExtractedCoverText(text || '(No extractable text)');
+        setExtractedCoverHtml(html || '<p>(No extractable content)</p>');
+      }
       // open modal to preview/name/edit after extraction
       setShowSelectedPreviewModal(true);
     };
@@ -260,7 +266,7 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
       }
       return btoa(binary);
     };
-    const fileBase64 = arrayBuffer ? `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}` : undefined;
+    const fileBase64 = arrayBuffer ? `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${arrayBufferToBase64(arrayBuffer)}` : undefined;
 
     setIsUploading(type);
     try {
@@ -317,7 +323,7 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
             <div className="ml-auto text-sm text-slate-400">Selected: <span className="font-semibold text-slate-200">{selectedUploadType === 'resume' ? 'Resume' : 'Cover Letter'}</span></div>
           </div>
 
-          <FileInput id="upload" onFileChange={(file) => handleFileChange(selectedUploadType)(file)} isLoading={isUploading === selectedUploadType} accept=".pdf" />
+          <FileInput id="upload" onFileChange={(file) => handleFileChange(selectedUploadType)(file)} isLoading={isUploading === selectedUploadType} accept=".docx" />
           {/* Selected-file preview is shown in a modal instead of inline */}
         </div>
 
@@ -355,13 +361,11 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
               <button onClick={() => { setShowSelectedPreviewModal(false); }} className="text-slate-500 hover:text-white">Close</button>
             </header>
             <div className="p-4">
-              <div className="mb-4 flex justify-center">
-                <iframe
-                  // use the captured preview src so the modal doesn't depend on the
-                  // possibly-changed `selectedUploadType` value; fallback to empty string
-                  src={selectedPreviewSrc || ''}
-                  className="w-full md:w-3/4 h-[55vh] rounded-md border border-slate-700"
-                  title="Selected PDF preview"
+              <div className="mb-4">
+                <div 
+                  className="w-full p-4 bg-white rounded-md border border-slate-700 prose prose-sm max-w-none overflow-auto" 
+                  style={{ maxHeight: '55vh', color: '#000' }}
+                  dangerouslySetInnerHTML={{ __html: selectedPreviewType === 'resume' ? extractedResumeHtml : extractedCoverHtml }}
                 />
               </div>
               <label className="block text-xs text-slate-400">Version name</label>
@@ -394,19 +398,10 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, ref
               <button onClick={() => setPreviewDoc(null)} className="text-slate-500 hover:text-white">Close</button>
             </header>
             <div className="p-4 w-full">
-              {previewDoc.filePath ? (
-                // Backend returns a filePath like `/uploads/<file>.pdf`.
-                // The frontend dev server (Vite) will respond to `/uploads/*` with the SPA index
-                // if we use a relative path, so ensure we point the iframe to the backend origin.
-                (() => {
-                  const fp = previewDoc.filePath || '';
-                  const previewUrl = fp.startsWith('http')
-                    ? fp
-                    : `${apiService.API_BASE_URL.replace(/\/api$/, '')}${fp}`;
-                  return (
-                    <iframe src={previewUrl} className="w-full h-[55vh] rounded-md border border-slate-700" title={`PDF preview ${previewDoc.name}`} />
-                  );
-                })()
+              {previewDoc.content ? (
+                <div className="w-full p-4 bg-white rounded-md border border-slate-700 text-sm overflow-auto" style={{ maxHeight: '55vh', whiteSpace: 'pre-wrap', color: '#000' }}>
+                  {previewDoc.content}
+                </div>
               ) : (
                 <div className="text-sm text-slate-200">(No preview available)</div>
               )}

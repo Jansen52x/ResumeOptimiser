@@ -1,9 +1,9 @@
 import React from 'react';
 import { SparklesIcon } from './icons/SparklesIcon';
 import { BriefcaseIcon } from './icons/BriefcaseIcon';
-import { DocumentIcon } from './icons/DocumentIcon';
+import { FileIcon } from './icons/FileIcon';
 
-type Tab = 'optimizer' | 'projects' | 'documents';
+type Tab = 'optimizer' | 'projects' | 'work-experience' | 'skills' | 'results';
 
 interface NavigationBarProps {
   activeTab: Tab;
@@ -48,10 +48,22 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({ activeTab, setActi
           label="Projects"
         />
         <NavButton
-          isActive={activeTab === 'documents'}
-          onClick={() => setActiveTab('documents')}
-          icon={<DocumentIcon className="w-5 h-5" />}
-          label="My Documents"
+          isActive={activeTab === 'work-experience'}
+          onClick={() => setActiveTab('work-experience')}
+          icon={<BriefcaseIcon className="w-5 h-5" />}
+          label="Experience"
+        />
+        <NavButton
+          isActive={activeTab === 'skills'}
+          onClick={() => setActiveTab('skills')}
+          icon={<SparklesIcon className="w-5 h-5" />}
+          label="Skills"
+        />
+        <NavButton
+          isActive={activeTab === 'results'}
+          onClick={() => setActiveTab('results')}
+          icon={<FileIcon className="w-5 h-5" />}
+          label="Results"
         />
       </div>
     </nav>

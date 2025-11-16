@@ -44,7 +44,7 @@ SMU Information Systems, Year 4 (Digitalisation \& Cloud Solutioning, Business A
 \href{https://portfolio-368.web.app}{Portfolio} \quad | \quad \href{https://github.com/Jansen52x}{Github} \quad | \quad \href{https://linkedin.com/in/yongray-teo}{LinkedIn}\\[6pt]
 
 % ---------------- SUMMARY ----------------
-{{ summary }}\\[10pt]
+((( summary )))\\[10pt]
 
 % ---------------- EDUCATION ----------------
 \section*{Education}
@@ -56,44 +56,41 @@ Double Major in Digitalisation \& Cloud Solutioning, Business Analytics\\
 
 % ---------------- WORK EXPERIENCE ----------------
 \section*{Work Experience}
-{% for exp in work_experience %}
+((* for exp in work_experience *))
 \workentry
-  { {{ exp.company }} }
-  { {{ exp.dates }} }
-  { {{ exp.role }} }
+  { ((( exp.company ))) }
+  { ((( exp.dates ))) }
+  { ((( exp.role ))) }
   {
-    {% for bullet in exp.bullets %}
-    \item {{ bullet }}
-    {% endfor %}
+    ((* for bullet in exp.bullets *))
+    \item ((( bullet )))
+    ((* endfor *))
   }
-{% endfor %}
+((* endfor *))
 
 \newpage
 
 % ---------------- NOTABLE PROJECTS ----------------
 \section*{Notable Projects (Refer to Portfolio for full list)}
-{% for proj in projects %}
+((* for proj in projects *))
 \projectentry
-  { {{ proj.company }} }
-  { {{ proj.dates }} }
-  { {{ proj.minor_desc }} }
+  { ((( proj.company ))) }
+  { ((( proj.dates ))) }
+  { ((( proj.minor_desc ))) }
   {
-    {% for bullet in proj.bullets %}
-    \item {{ bullet }}
-    {% endfor %}
+    ((* for bullet in proj.bullets *))
+    \item ((( bullet )))
+    ((* endfor *))
   }
-{% endfor %}
+((* endfor *))
 
 % ---------------- SKILLS ----------------
 
 \section*{Skills}
-{% for skill in skills %}
+((* for skill in skills *))
 \skillentry
-    { {{ skill.title }}: } 
-    { {{ skill.items }} }
-{% endfor %}
-
-\textbf{Languages:} English, Mandarin\\
-{{ skills }}
+    { ((( skill.title ))): } 
+    { ((( skill.items ))) }
+((* endfor *))
 
 \end{document}

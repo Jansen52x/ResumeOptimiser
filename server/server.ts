@@ -48,24 +48,35 @@ const initializeDatabase = async () => {
     });
   }
 
-  const hasDocumentsTable = await knex.schema.hasTable('documents');
-  if (!hasDocumentsTable) {
-    await knex.schema.createTable('documents', table => {
+  const hasResultsTable = await knex.schema.hasTable('results');
+  if (!hasResultsTable) {
+    await knex.schema.createTable('results', table => {
       table.string('id').primary();
-      table.string('name').notNullable();
-      table.text('content');
-      table.string('type').notNullable(); // 'resume' or 'coverLetter'
-      table.string('file_path'); // optional path to stored PDF (e.g. /uploads/doc-...pdf)
+      table.string('job_title').notNullable();
+      table.string('company_name').notNullable();
+      table.text('resume').notNullable();
+      table.text('cover_letter').notNullable();
+      table.timestamp('created_at').defaultTo(knex.fn.now());
     });
   }
-  else {
-    // ensure file_path column exists for older DBs
-    const hasFilePath = await knex.schema.hasColumn('documents', 'file_path');
-    if (!hasFilePath) {
-      await knex.schema.table('documents', table => {
-        table.string('file_path');
-      });
-    }
+
+  const hasWorkExperiencesTable = await knex.schema.hasTable('work_experiences');
+  if (!hasWorkExperiencesTable) {
+    await knex.schema.createTable('work_experiences', table => {
+      table.string('id').primary();
+      table.string('company').notNullable();
+      table.string('role').notNullable();
+      table.string('dates').notNullable();
+      table.json('bullets'); // Array of bullet points
+    });
+  }
+
+  const hasSkillsTable = await knex.schema.hasTable('skills');
+  if (!hasSkillsTable) {
+    await knex.schema.createTable('skills', table => {
+      table.string('id').primary();
+      table.string('skill_name').notNullable();
+    });
   }
 };
 
@@ -102,70 +113,117 @@ app.delete('/api/projects/:id', async (req, res) => {
   res.status(204).send();
 });
 
-// Documents
-app.get('/api/documents', async (req, res) => {
-  const resumesDb = await knex('documents').where({ type: 'resume' }).select('*');
-  const coverLettersDb = await knex('documents').where({ type: 'coverLetter' }).select('*');
-
-  // map file_path -> filePath for client-friendly casing
-  const mapRow = (r: any) => ({ id: r.id, name: r.name, content: r.content, filePath: r.file_path, type: r.type });
-  res.json({ resumes: resumesDb.map(mapRow), coverLetters: coverLettersDb.map(mapRow) });
+// Work Experiences
+app.get('/api/work-experiences', async (req, res) => {
+  const experiences = await knex('work_experiences').select('*');
+  res.json(experiences.map(exp => ({ ...exp, bullets: JSON.parse(exp.bullets) })));
 });
 
-app.post('/api/documents', async (req, res) => {
-  const { type, fileBase64, ...docData } = req.body;
-  const id = `doc-${crypto.randomUUID()}`;
-  let filePath: string | null = null;
-
-  // if a base64 PDF was provided, decode and write to uploads directory
-  if (fileBase64) {
-    try {
-      // strip data URL prefix if present
-      const base64 = (fileBase64 as string).startsWith('data:') ? (fileBase64 as string).split(',')[1] : fileBase64 as string;
-      const buffer = Buffer.from(base64, 'base64');
-  const filename = `${id}.pdf`;
-  const outPath = path.join(uploadsDir, filename);
-  await fs.writeFile(outPath, buffer);
-  // return an absolute URL so clients can directly fetch the PDF from the backend
-  filePath = `${serverOrigin}/uploads/${filename}`;
-    } catch (e) {
-      console.error('Failed to write uploaded file', e);
-      return res.status(500).json({ error: 'Failed to save uploaded file' });
-    }
-  }
-
-  const newDoc = { ...docData, id, type, file_path: filePath } as any;
-  await knex('documents').insert(newDoc);
-
-  // return client-friendly shape
-  res.status(201).json({ id, ...docData, type, filePath });
+app.post('/api/work-experiences', async (req, res) => {
+  const { bullets, ...rest } = req.body;
+  const newExperience = {
+    ...rest,
+    id: `exp-${crypto.randomUUID()}`,
+    bullets: JSON.stringify(bullets)
+  };
+  await knex('work_experiences').insert(newExperience);
+  res.status(201).json({ ...newExperience, bullets });
 });
 
-app.delete('/api/documents/:type/:id', async (req, res) => {
+app.put('/api/work-experiences/:id', async (req, res) => {
   const { id } = req.params;
-  // get file_path if any and delete file
-  const row = await knex('documents').where({ id }).first();
-  if (row && row.file_path) {
-    try {
-      // row.file_path may be an absolute URL (e.g. http://host/uploads/filename.pdf)
-      // or a relative path (/uploads/filename.pdf). Extract the pathname to compute
-      // the filesystem path to the stored file.
-      let pathname = row.file_path;
-      try {
-        const u = new URL(row.file_path);
-        pathname = u.pathname; // e.g. /uploads/filename.pdf
-      } catch (e) {
-        // not a valid URL, assume it's already a path
-      }
-      const full = path.join(__dirname, pathname.replace(/^\//, ''));
-      if (existsSync(full)) {
-        await fs.unlink(full);
-      }
-    } catch (e) {
-      console.error('Failed to remove file for document', id, e);
-    }
+  const { bullets, ...rest } = req.body;
+  const updatedData = { ...rest, bullets: JSON.stringify(bullets) };
+  await knex('work_experiences').where({ id }).update(updatedData);
+  res.json({ id, ...req.body });
+});
+
+app.delete('/api/work-experiences/:id', async (req, res) => {
+  const { id } = req.params;
+  await knex('work_experiences').where({ id }).del();
+  res.status(204).send();
+});
+
+// Skills
+app.get('/api/skills', async (req, res) => {
+  const skills = await knex('skills').select('*');
+  res.json(skills);
+});
+
+app.post('/api/skills', async (req, res) => {
+  const { skill_name } = req.body;
+  const newSkill = {
+    id: `skill-${crypto.randomUUID()}`,
+    skill_name
+  };
+  await knex('skills').insert(newSkill);
+  res.status(201).json(newSkill);
+});
+
+app.delete('/api/skills/:id', async (req, res) => {
+  const { id } = req.params;
+  await knex('skills').where({ id }).del();
+  res.status(204).send();
+});
+
+// Bulk update skills (replace all)
+app.put('/api/skills', async (req, res) => {
+  const { skills } = req.body; // array of skill names
+  
+  // Delete all existing skills
+  await knex('skills').del();
+  
+  // Insert new skills
+  const newSkills = skills.map((skillName: string) => ({
+    id: `skill-${crypto.randomUUID()}`,
+    skill_name: skillName
+  }));
+  
+  if (newSkills.length > 0) {
+    await knex('skills').insert(newSkills);
   }
-  await knex('documents').where({ id }).del();
+  
+  res.json(newSkills);
+});
+
+// Results
+app.get('/api/results', async (req, res) => {
+  const results = await knex('results').select('*').orderBy('created_at', 'desc');
+  res.json(results.map(r => ({
+    id: r.id,
+    jobTitle: r.job_title,
+    companyName: r.company_name,
+    resume: typeof r.resume === 'string' ? JSON.parse(r.resume) : r.resume,
+    coverLetter: r.cover_letter,
+    createdAt: r.created_at
+  })));
+});
+
+app.post('/api/results', async (req, res) => {
+  const { jobTitle, companyName, resume, coverLetter } = req.body;
+  const id = `result-${crypto.randomUUID()}`;
+  const newResult = {
+    id,
+    job_title: jobTitle,
+    company_name: companyName,
+    resume: JSON.stringify(resume), // Store as JSON string
+    cover_letter: coverLetter,
+    created_at: new Date().toISOString()
+  };
+  await knex('results').insert(newResult);
+  res.status(201).json({
+    id,
+    jobTitle,
+    companyName,
+    resume,
+    coverLetter,
+    createdAt: newResult.created_at
+  });
+});
+
+app.delete('/api/results/:id', async (req, res) => {
+  const { id } = req.params;
+  await knex('results').where({ id }).del();
   res.status(204).send();
 });
 

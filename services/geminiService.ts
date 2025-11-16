@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import type { AppData, Project, OptimizedResult } from '../types';
+import type { AppData, Project, OptimizedResult, WorkExperience, Skill, SkillCategory, ProjectEntry } from '../types';
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable not set");
@@ -18,105 +18,49 @@ ${p.description.map((d) => `- ${d}`).join('\n')}
     .join('\n---\n');
 }
 
-export const optimizeApplication = async (
-  appData: AppData
-): Promise<OptimizedResult> => {
+function formatWorkExperiencesForPrompt(experiences: WorkExperience[]): string {
+  return experiences
+    .map(
+      (exp) => `
+### ${exp.company} - ${exp.role} (${exp.dates})
+${exp.bullets.map((b) => `- ${b}`).join('\n')}
+`
+    )
+    .join('\n---\n');
+}
 
+/**
+ * Step 1: Optimize work experience and project bullets based on job posting
+ */
+export const optimizeBullets = async (
+  jobPosting: string,
+  jobPostingScreenshot: string | undefined,
+  workExperiences: WorkExperience[],
+  selectedProjects: Project[]
+): Promise<{ optimizedWorkExperience: WorkExperience[], optimizedProjects: ProjectEntry[] }> => {
   const model = 'gemini-2.5-flash';
   
-  const systemInstruction = `
-You are an expert career coach and professional resume writer. 
-Your task is to help a job applicant tailor their resume and write a compelling cover letter for a specific job posting. 
-You will be given a job posting,
-the applicant's current resume (either as text or an image),
-a curated list of their most relevant projects,
-an old resume for formatting reference,
-a sample cover letter for inspiration, 
-and potentially some additional notes from the applicant about why they are interested in the role.
+  const systemInstruction = `You are a resume optimizer. Rewrite bullet points to match the job posting keywords while keeping company names, titles, and dates unchanged. Use action verbs and quantify achievements. Keep bullets concise (1-2 lines).`;
 
-Your response MUST be a JSON object that strictly follows this schema:
-1.  **resume**: A string containing the full text of the optimized resume in Markdown format.
-2.  **coverLetter**: A string containing the full text of the newly generated cover letter in Markdown format.
+  const textPrompt = `Job Posting:
+${jobPosting}
 
-Follow these instructions meticulously:
+Work Experience:
+${formatWorkExperiencesForPrompt(workExperiences)}
 
-**For the Resume:**
-1.  **Analyze the Job Posting**: Identify the key skills, qualifications, experience level, and technologies mentioned.
-2.  **Extract Resume Content**: If an image of a resume is provided, first extract all the text content from it.
-3.  **Incorporate Projects**: The user has pre-selected their most relevant projects. Your task is to seamlessly integrate them.
-4.  **Tailor Content**:
-    *   Rewrite the descriptions of the selected projects to use keywords and phrasing from the job posting. Emphasize the impact and results.
-    *   Review the applicant's existing resume content (skills, experiences). Rephrase bullet points to align with the job's requirements.
-    *   Suggest a technical skills section that highlights the most relevant technologies for the role.
-    *   If some experiences in the provided resume are irrelevant, omit them from the final output.
-    *   Use the "Past Resume Format" as a loose inspiration for structure and tone, but prioritize clarity and impact.
-5.  **Formatting**: Use Markdown for clear formatting. Use headings (#, ##), bullet points (* or -), and bold text (**text**) to structure the resume professionally.
+Projects:
+${formatProjectsForPrompt(selectedProjects)}
 
-**For the Cover Letter:**
-1.  **Analyze Job & Company**: Use the job posting to understand the role and company.
-2.  **Synthesize Applicant's Strengths**: Draw from the newly tailored resume content and project descriptions.
-3.  **Inspiration**: Use the provided "Cover Letter Inspiration" to understand the applicant's tone, but do not copy it directly. The new letter must be unique and tailored to the new job.
-4.  **Personalize**: If the applicant provides additional information about their excitement for the role, weave these personal motivations into the cover letter to make it more authentic and compelling.
-5.  **Structure**: Write a professional 3-4 paragraph cover letter.
-6.  **Formatting**: The output should be a single string of well-formatted Markdown.`;
+Optimize bullets for this job.`;
 
-  const resumeContentPrompt = appData.resumeContent 
-    ? `## Applicant's Current Resume Content\n\`\`\`\n${appData.resumeContent}\n\`\`\`` 
-    : "The applicant's resume is provided as an image. Please extract the content from it.";
-
-  const additionalInfoPrompt = appData.additionalInfo
-    ? `## Additional Information from Applicant
-\`\`\`
-${appData.additionalInfo}
-\`\`\`
-`
-    : '';
-
-  const textPrompt = `
-  ## Job Posting
-  \`\`\`
-  ${appData.jobPosting}
-  \`\`\`
-
-  ${resumeContentPrompt}
-
-  ## Applicant's Selected Projects For This Application
-  \`\`\`
-  ${formatProjectsForPrompt(appData.selectedProjects)}
-  \`\`\`
-
-  ## Past Resume (for formatting reference)
-  \`\`\`
-  ${appData.pastResumeFormat || 'No past resume provided. Create a standard professional format.'}
-  \`\`\`
-
-  ## Cover Letter (for inspiration)
-  \`\`\`
-  ${appData.coverLetterInspiration || 'No cover letter provided. Write a new one from scratch.'}
-  \`\`\`
-
-  ${additionalInfoPrompt}
-  `;
-  
-  // Build contents: always include the main textPrompt, and append any images (job posting or resume) as inlineData parts
   let contents: any = textPrompt;
-  const parts: any[] = [];
-  parts.push({ text: textPrompt });
+  const parts: any[] = [{ text: textPrompt }];
 
-  if (appData.jobPostingScreenshot) {
-    parts.push({
-      inlineData: {
-        mimeType: 'image/jpeg', // Assuming jpeg, could be dynamic
-        data: appData.jobPostingScreenshot,
-      },
-    });
-  }
-
-  if (appData.resumeScreenshot) {
+  if (jobPostingScreenshot) {
     parts.push({
       inlineData: {
         mimeType: 'image/jpeg',
-        data: appData.resumeScreenshot,
+        data: jobPostingScreenshot,
       },
     });
   }
@@ -134,10 +78,35 @@ ${appData.additionalInfo}
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          resume: { type: Type.STRING },
-          coverLetter: { type: Type.STRING },
+          optimizedWorkExperience: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                company: { type: Type.STRING },
+                role: { type: Type.STRING },
+                dates: { type: Type.STRING },
+                bullets: { type: Type.ARRAY, items: { type: Type.STRING } }
+              },
+              required: ["id", "company", "role", "dates", "bullets"]
+            }
+          },
+          optimizedProjects: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                company: { type: Type.STRING },
+                dates: { type: Type.STRING },
+                minor_desc: { type: Type.STRING },
+                bullets: { type: Type.ARRAY, items: { type: Type.STRING } }
+              },
+              required: ["company", "dates", "minor_desc", "bullets"]
+            }
+          }
         },
-        required: ["resume", "coverLetter"],
+        required: ["optimizedWorkExperience", "optimizedProjects"]
       }
     }
   });
@@ -145,15 +114,139 @@ ${appData.additionalInfo}
   const jsonText = response.text.trim();
   try {
     const result = JSON.parse(jsonText);
-    if (result.resume && result.coverLetter) {
-      return result as OptimizedResult;
-    } else {
-      throw new Error("Invalid JSON structure received from API.");
-    }
+    return result;
   } catch (error) {
-     console.error("Failed to parse Gemini response:", jsonText);
-     throw new Error("Could not parse the optimized data. The model may have returned an unexpected format.");
+    console.error("Failed to parse bullet optimization response:", jsonText);
+    throw new Error("Could not optimize bullets. The AI returned an unexpected format.");
   }
+};
+
+/**
+ * Step 2: Categorize skills based on job posting relevance
+ */
+export const categorizeSkills = async (
+  jobPosting: string,
+  jobPostingScreenshot: string | undefined,
+  skills: Skill[]
+): Promise<SkillCategory[]> => {
+  const model = 'gemini-2.5-flash';
+  
+  const systemInstruction = `Categorize technical skills for a resume based on job relevance. Create 3-5 categories (e.g., "Frontend", "Backend", "DevOps") with skills as comma-separated strings, ordered by relevance.`;
+
+  const skillsList = skills.map(s => s.skill_name).join(', ');
+
+  const textPrompt = `Job Posting:
+${jobPosting}
+
+Skills:
+${skillsList}
+
+Categorize by relevance.`;
+
+  let contents: any = textPrompt;
+  const parts: any[] = [{ text: textPrompt }];
+
+  if (jobPostingScreenshot) {
+    parts.push({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: jobPostingScreenshot,
+      },
+    });
+  }
+
+  if (parts.length > 1) {
+    contents = { parts };
+  }
+
+  const response = await ai.models.generateContent({
+    model,
+    contents,
+    config: {
+      systemInstruction,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            items: { type: Type.STRING }
+          },
+          required: ["title", "items"]
+        }
+      }
+    }
+  });
+
+  const jsonText = response.text.trim();
+  try {
+    const result = JSON.parse(jsonText);
+    return result;
+  } catch (error) {
+    console.error("Failed to parse skill categorization response:", jsonText);
+    throw new Error("Could not categorize skills. The AI returned an unexpected format.");
+  }
+};
+
+/**
+ * Step 3: Generate personalized cover letter with company value analysis
+ */
+export const generateCoverLetter = async (
+  jobPosting: string,
+  jobPostingScreenshot: string | undefined,
+  companyName: string,
+  optimizedWorkExperience: WorkExperience[],
+  optimizedProjects: ProjectEntry[],
+  additionalInfo?: string
+): Promise<string> => {
+  const model = 'gemini-2.5-flash';
+  
+  const systemInstruction = `Write a 3-paragraph cover letter: 1) Why interested (mention company values), 2) Relevant experience (2-3 examples with achievements), 3) Enthusiasm to contribute. Professional, concise, tailored. Plain text only.`;
+
+  const additionalInfoSection = additionalInfo 
+    ? `\n## Additional Context from Applicant\n\`\`\`\n${additionalInfo}\n\`\`\`\n` 
+    : '';
+
+  const textPrompt = `Job: ${jobPosting}
+
+Company: ${companyName}
+
+Experience:
+${formatWorkExperiencesForPrompt(optimizedWorkExperience)}
+
+Projects:
+${optimizedProjects.map(p => `${p.company} (${p.dates}) - ${p.minor_desc}\n${p.bullets.join('\n')}`).join('\n---\n')}
+${additionalInfoSection}
+
+Write cover letter.`;
+
+  let contents: any = textPrompt;
+  const parts: any[] = [{ text: textPrompt }];
+
+  if (jobPostingScreenshot) {
+    parts.push({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: jobPostingScreenshot,
+      },
+    });
+  }
+
+  if (parts.length > 1) {
+    contents = { parts };
+  }
+
+  const response = await ai.models.generateContent({
+    model,
+    contents,
+    config: {
+      systemInstruction,
+      responseMimeType: "text/plain"
+    }
+  });
+
+  return response.text.trim();
 };
 
 
@@ -219,36 +312,14 @@ export const formatNewProject = async (rawText: string, existingProjects: Projec
 export const suggestProjects = async (jobPosting: string, allProjects: Project[]): Promise<string[]> => {
     const model = 'gemini-2.5-flash';
 
-    const systemInstruction = `You are an expert career coach helping job applicants select the most relevant projects for their resume. Given a job posting and a list of all available projects, you must analyze which projects are most relevant to the role and return ONLY the project IDs as a JSON array of strings.
+    const systemInstruction = `Select the 3 most relevant project IDs for this job based on matching technologies, skills, and responsibilities. Return as JSON array.`;
 
-    Analyze the job posting for:
-    - Required and preferred skills
-    - Technologies mentioned
-    - Type of role and responsibilities
-    - Industry and domain
+    const prompt = `Job: ${jobPosting}
 
-    Then evaluate each project based on:
-    - Relevance of technologies used
-    - Alignment with job responsibilities
-    - Demonstrated skills that match requirements
-    - Impact and complexity
+Projects:
+${allProjects.map(p => `ID: ${p.id}\n${p.title} - ${p.subtitle}\n${p.description.join('; ')}`).join('\n---\n')}
 
-    Return a JSON array containing the IDs of the 3-5 most relevant projects, ordered from most to least relevant.`;
-
-    const prompt = `
-    ## Job Posting
-    \`\`\`
-    ${jobPosting}
-    \`\`\`
-
-    ## Available Projects
-    ${allProjects.map(p => `
-    ID: ${p.id}
-    ${formatProjectsForPrompt([p])}
-    `).join('\n---\n')}
-
-    Please analyze and return the IDs of the most relevant projects as a JSON array of strings.
-    `;
+Return top 3 IDs.`;
 
     const response = await ai.models.generateContent({
         model,

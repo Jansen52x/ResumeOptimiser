@@ -16,6 +16,7 @@ def escape_latex(text):
     if not isinstance(text, str):
         return text
     
+    # Replace special characters
     replacements = {
         '&': r'\&',
         '%': r'\%',
@@ -49,10 +50,14 @@ def escape_data(data):
 def generate_resume():
     data = request.json
     
+    # Create a temporary directory for compilation
+    temp_dir = tempfile.mkdtemp()
+    
     try:
-        # Load and render LaTeX template
+        # Jinja2 LaTeX template with custom delimiters to avoid conflicts with LaTeX
         template_path = os.path.join(os.path.dirname(__file__), "resume_template.tex")
         
+        # Create Jinja2 environment with custom delimiters
         env = Environment(
             block_start_string='((*',
             block_end_string='*))',
@@ -65,6 +70,7 @@ def generate_resume():
         with open(template_path, 'r', encoding='utf-8') as f:
             tex_template = env.from_string(f.read())
 
+        # Escape LaTeX special characters in the data
         escaped_data = {
             "summary": escape_latex(data.get("summary", "")),
             "work_experience": escape_data(data.get("work_experience", [])),
@@ -72,45 +78,73 @@ def generate_resume():
             "skills": escape_data(data.get("skills", []))
         }
 
+        # Render the template with the escaped data
         tex_content = tex_template.render(**escaped_data)
         
-        # Use LaTeX.Online API to compile
-        response = requests.post(
-            LATEX_API_URL,
-            params={'target': 'output.pdf'},
-            files={'output.tex': tex_content.encode('utf-8')},
-            timeout=30
+        # Write to temp directory
+        tex_file = os.path.join(temp_dir, "output.tex")
+        with open(tex_file, "w", encoding='utf-8') as f:
+            f.write(tex_content)
+
+        # Compile LaTeX to PDF (run twice for proper formatting)
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "output.tex"],
+            cwd=temp_dir,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
         )
         
-        if response.status_code != 200:
-            raise Exception(f"LaTeX compilation failed with status {response.status_code}")
+        # Run again for references
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "output.tex"],
+            cwd=temp_dir,
+            check=False,  # Don't fail if second pass has warnings
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
         
-        # Save PDF to temp file and return it
-        temp_dir = tempfile.mkdtemp()
-        pdf_file = os.path.join(temp_dir, "resume.pdf")
-        with open(pdf_file, 'wb') as f:
-            f.write(response.content)
+        pdf_file = os.path.join(temp_dir, "output.pdf")
+        
+        if not os.path.exists(pdf_file):
+            raise FileNotFoundError("PDF generation failed")
         
         return send_file(pdf_file, as_attachment=True, download_name="resume.pdf", mimetype="application/pdf")
     
+    except subprocess.CalledProcessError as e:
+        error_msg = f"LaTeX compilation failed: {e.stderr.decode('utf-8') if e.stderr else str(e)}"
+        print(error_msg)
+        return {"error": "LaTeX compilation failed", "details": error_msg}, 500
     except Exception as e:
         error_msg = f"Failed to generate PDF: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
         return {"error": "Failed to generate PDF", "details": error_msg}, 500
+    finally:
+        # Clean up temp directory after a delay to allow file to be sent
+        # Commenting out for debugging - uncomment after testing
+        # try:
+        #     shutil.rmtree(temp_dir)
+        # except:
+        #     pass
+        pass
 
 @app.route("/generate-cover-letter", methods=["POST"])
 def generate_cover_letter():
     data = request.json
     
+    # Create a temporary directory for compilation
+    temp_dir = tempfile.mkdtemp()
+    
     try:
-        # Load and render LaTeX template
+        # Jinja2 LaTeX template with custom delimiters to avoid conflicts with LaTeX
         template_path = os.path.join(os.path.dirname(__file__), "cover_letter_template.tex")
         
+        # Create Jinja2 environment with custom delimiters
         env = Environment(
             block_start_string='((*',
-            block_end_string='*))',
+            block_end_string='))',
             variable_start_string='(((',
             variable_end_string=')))',
             comment_start_string='((#',
@@ -120,39 +154,58 @@ def generate_cover_letter():
         with open(template_path, 'r', encoding='utf-8') as f:
             tex_template = env.from_string(f.read())
 
+        # Escape LaTeX special characters in the data
         escaped_data = {
             "date": data.get("date", ""),
             "company_name": escape_latex(data.get("company_name", "")),
             "body": escape_latex(data.get("body", ""))
         }
 
+        # Render the template with the escaped data
         tex_content = tex_template.render(**escaped_data)
         
-        # Use LaTeX.Online API to compile
-        response = requests.post(
-            LATEX_API_URL,
-            params={'target': 'cover_letter.pdf'},
-            files={'cover_letter.tex': tex_content.encode('utf-8')},
-            timeout=30
+        # Write to temp directory
+        tex_file = os.path.join(temp_dir, "cover_letter.tex")
+        with open(tex_file, "w", encoding='utf-8') as f:
+            f.write(tex_content)
+
+        # Compile LaTeX to PDF (run twice for proper formatting)
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "cover_letter.tex"],
+            cwd=temp_dir,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
         )
         
-        if response.status_code != 200:
-            raise Exception(f"LaTeX compilation failed with status {response.status_code}")
+        # Run again for references
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "cover_letter.tex"],
+            cwd=temp_dir,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
         
-        # Save PDF to temp file and return it
-        temp_dir = tempfile.mkdtemp()
         pdf_file = os.path.join(temp_dir, "cover_letter.pdf")
-        with open(pdf_file, 'wb') as f:
-            f.write(response.content)
+        
+        if not os.path.exists(pdf_file):
+            raise FileNotFoundError("PDF generation failed")
         
         return send_file(pdf_file, as_attachment=True, download_name="cover_letter.pdf", mimetype="application/pdf")
     
+    except subprocess.CalledProcessError as e:
+        error_msg = f"LaTeX compilation failed: {e.stderr.decode('utf-8') if e.stderr else str(e)}"
+        print(error_msg)
+        return {"error": "LaTeX compilation failed", "details": error_msg}, 500
     except Exception as e:
-        error_msg = f"Failed to generate cover letter PDF: {str(e)}"
+        error_msg = f"Failed to generate PDF: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
-        return {"error": "Failed to generate cover letter", "details": error_msg}, 500
+        return {"error": "Failed to generate PDF", "details": error_msg}, 500
+    finally:
+        pass
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)

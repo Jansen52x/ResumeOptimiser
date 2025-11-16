@@ -46,6 +46,11 @@ export const ProjectSelectorModal: React.FC<ProjectSelectorModalProps> = ({
   const [currentSelectedIds, setCurrentSelectedIds] = useState(selectedIds);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Sync with parent when selectedIds change (for AI suggestions)
+  React.useEffect(() => {
+    setCurrentSelectedIds(selectedIds);
+  }, [selectedIds]);
+
   const handleToggle = (id: string) => {
     setCurrentSelectedIds(prev =>
       prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]

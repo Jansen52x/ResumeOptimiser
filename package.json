@@ -13,11 +13,12 @@
   "dependencies": {
     "@google/genai": "^1.28.0",
     "concurrently": "^9.2.1",
-  "pdfjs-dist": "^2.16.105",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "json-server": "^1.0.0-beta.3",
     "knex": "^3.1.0",
+    "mammoth": "^1.11.0",
+    "pdfjs-dist": "^2.16.105",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "sqlite3": "^5.1.7"
